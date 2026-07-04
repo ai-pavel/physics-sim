@@ -29,11 +29,8 @@ public struct CollisionDetector {
             }
             return nil
         case (.polygon, .circle(let rB)):
-            if let c = circleVsPolygon(circle: b, radius: rB, polygon: a) {
-                // Flip normal and bodies
-                return Contact(bodyA: a, bodyB: b, normal: -c.normal, depth: c.depth, point: c.point)
-            }
-            return nil
+            // circleVsPolygon already returns bodyA=polygon, bodyB=circle with correct normal
+            return circleVsPolygon(circle: b, radius: rB, polygon: a)
         case (.polygon, .polygon):
             return polygonVsPolygon(a: a, b: b)
         }
@@ -294,13 +291,5 @@ public struct CollisionResolver {
         let correction = max(contact.depth - 0.01, 0) / invMassSum * 0.4 * contact.normal
         a.position -= correction * a.inverseMass
         b.position += correction * b.inverseMass
-    }
-}
-
-// Helper: cross product of Vec2 with scalar (perpendicular velocity)
-extension Vec2 {
-    /// Returns the velocity at this offset given an angular velocity.
-    func cross(_ s: Double) -> Vec2 {
-        Vec2(-s * y, s * x)
     }
 }

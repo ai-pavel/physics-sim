@@ -65,9 +65,9 @@ public struct Vec2: Equatable, CustomStringConvertible {
         x * other.y - y * other.x
     }
 
-    /// Cross product with a scalar (returns perpendicular vector).
+    /// Cross product with a scalar (returns perpendicular vector, ω × r convention).
     public func cross(_ s: Double) -> Vec2 {
-        Vec2(s * y, -s * x)
+        Vec2(-s * y, s * x)
     }
 
     /// Squared magnitude.
