@@ -1,6 +1,7 @@
 # PhysicsSim
 
 [![CI](https://github.com/pavel-genai/physics-sim/actions/workflows/ci.yml/badge.svg)](https://github.com/pavel-genai/physics-sim/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/pavel-genai/physics-sim/branch/main/graph/badge.svg)](https://codecov.io/gh/pavel-genai/physics-sim)
 
 A 2D rigid body physics engine implemented in Swift.
 
