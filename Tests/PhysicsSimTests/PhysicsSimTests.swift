@@ -306,3 +306,331 @@ final class IntegratorTests: XCTestCase {
         XCTAssertEqual(body.position.y, 5)
     }
 }
+
+// MARK: - Coverage tests
+
+final class CoverageBodyTests: XCTestCase {
+    func testApplyForceAtPointGeneratesTorque() {
+        let body = Body(shape: .circle(radius: 1), position: Vec2(0, 0), mass: 1.0)
+        body.applyForce(Vec2(10, 0), at: Vec2(0, 1))
+        XCTAssertEqual(body.force.x, 10)
+        XCTAssertEqual(body.force.y, 0)
+        // r=(0,1), f=(10,0) -> cross = 0*0 - 1*10 = -10
+        XCTAssertEqual(body.torque, -10, accuracy: 1e-10)
+    }
+
+    func testApplyImpulseAtPointGeneratesAngularVelocity() {
+        let body = Body(shape: .circle(radius: 1), position: Vec2(0, 0), mass: 1.0)
+        body.applyImpulse(Vec2(10, 0), at: Vec2(0, 1))
+        XCTAssertEqual(body.velocity.x, 10, accuracy: 1e-10)
+        // r=(0,1), impulse=(10,0) -> cross = -10
+        XCTAssertNotEqual(body.angularVelocity, 0)
+    }
+
+    func testBodyEquatableAndHashable() {
+        let a = Body(shape: .circle(radius: 1), position: .zero)
+        let b = Body(shape: .circle(radius: 2), position: Vec2(5, 5))
+        let a2 = a
+        XCTAssertEqual(a, a2)
+        XCTAssertNotEqual(a, b)
+        var set = Set<Body>()
+        set.insert(a)
+        set.insert(b)
+        set.insert(a)
+        XCTAssertEqual(set.count, 2)
+    }
+}
+
+final class CoverageShapeTests: XCTestCase {
+    func testCircleWorldVerticesIsEmpty() {
+        let shape = Shape.circle(radius: 3)
+        let verts = shape.worldVertices(position: Vec2(1, 2), angle: 1.0)
+        XCTAssertTrue(verts.isEmpty)
+    }
+
+    func testCircleWorldNormalsIsEmpty() {
+        let shape = Shape.circle(radius: 3)
+        let normals = shape.worldNormals(angle: 0.5)
+        XCTAssertTrue(normals.isEmpty)
+    }
+
+    func testPolygonWorldNormals() {
+        let shape = Shape.rectangle(width: 2, height: 2)
+        let normals = shape.worldNormals(angle: 0)
+        XCTAssertEqual(normals.count, 4)
+        // Each normal should be a unit vector
+        for n in normals {
+            XCTAssertEqual(n.length, 1, accuracy: 1e-10)
+        }
+        // Rotated normals
+        let rotated = shape.worldNormals(angle: .pi / 2)
+        XCTAssertEqual(rotated.count, 4)
+        for n in rotated {
+            XCTAssertEqual(n.length, 1, accuracy: 1e-10)
+        }
+    }
+}
+
+final class CoverageCollisionTests: XCTestCase {
+    func testCirclePolygonCollision() {
+        let detector = CollisionDetector()
+        let circle = Body(shape: .circle(radius: 0.5), position: Vec2(0, 1.2), mass: 1.0)
+        let poly = Body(shape: .rectangle(width: 2, height: 2), position: Vec2(0, 0), isStatic: true)
+        let contact = detector.detect(a: circle, b: poly)
+        XCTAssertNotNil(contact)
+        if let c = contact {
+            // bodyA should be polygon, bodyB circle
+            XCTAssertEqual(c.bodyA, poly)
+            XCTAssertEqual(c.bodyB, circle)
+            XCTAssertGreaterThan(c.depth, 0)
+        }
+    }
+
+    func testPolygonCircleCollision() {
+        let detector = CollisionDetector()
+        let poly = Body(shape: .rectangle(width: 2, height: 2), position: Vec2(0, 0), isStatic: true)
+        let circle = Body(shape: .circle(radius: 0.5), position: Vec2(0, 1.2), mass: 1.0)
+        let contact = detector.detect(a: poly, b: circle)
+        XCTAssertNotNil(contact)
+    }
+
+    func testCirclePolygonNoCollision() {
+        let detector = CollisionDetector()
+        let circle = Body(shape: .circle(radius: 0.5), position: Vec2(10, 10))
+        let poly = Body(shape: .rectangle(width: 2, height: 2), position: Vec2(0, 0))
+        XCTAssertNil(detector.detect(a: circle, b: poly))
+        // Reverse order too
+        XCTAssertNil(detector.detect(a: poly, b: circle))
+    }
+
+    func testCircleCircleCoincident() {
+        let detector = CollisionDetector()
+        let a = Body(shape: .circle(radius: 1), position: Vec2(0, 0))
+        let b = Body(shape: .circle(radius: 1), position: Vec2(0, 0))
+        let contact = detector.detect(a: a, b: b)
+        XCTAssertNotNil(contact)
+        if let c = contact {
+            // Coincident -> default normal (1,0)
+            XCTAssertEqual(c.normal.x, 1, accuracy: 1e-10)
+            XCTAssertEqual(c.normal.y, 0, accuracy: 1e-10)
+            XCTAssertEqual(c.depth, 2, accuracy: 1e-10)
+        }
+    }
+
+    func testPolygonPolygonNormalFlippedAndBEdgeOverlap() {
+        // Place B to the left of A so the best normal from A's edges must be
+        // flipped to point from A to B, and exercise B's edge-axis loop with
+        // overlap on each axis.
+        let detector = CollisionDetector()
+        let a = Body(shape: .rectangle(width: 2, height: 2), position: Vec2(0, 0))
+        let b = Body(shape: .rectangle(width: 2, height: 2), position: Vec2(-1.5, 0))
+        let contact = detector.detect(a: a, b: b)
+        XCTAssertNotNil(contact)
+        if let c = contact {
+            // Normal should point from A to B (negative x)
+            XCTAssertLessThan(c.normal.x, 0)
+            XCTAssertEqual(c.depth, 0.5, accuracy: 1e-9)
+        }
+    }
+
+    func testCircleVertexAxisBranch() {
+        // Position the circle diagonally near a rectangle corner so that the
+        // closest-vertex axis (not an edge normal) determines the minimum
+        // overlap.
+        let detector = CollisionDetector()
+        let poly = Body(shape: .rectangle(width: 4, height: 4),
+                        position: Vec2(0, 0))
+        let circle = Body(shape: .circle(radius: 1), position: Vec2(2.5, 2.5))
+        let contact = detector.detect(a: circle, b: poly)
+        XCTAssertNotNil(contact)
+        if let c = contact {
+            XCTAssertGreaterThan(c.depth, 0)
+            // The min-overlap axis is the diagonal vertex axis; normal should
+            // point from polygon to circle (positive xy).
+            XCTAssertGreaterThan(c.normal.x + c.normal.y, 0)
+        }
+    }
+
+    func testPolygonPolygonBEdgeAxisMinOverlap() {
+        // A is a diamond (square rotated 45°); B is an axis-aligned square
+        // positioned to the right. The minimum-overlap axis comes from one of
+        // B's edges (the x-axis), exercising the B-edge branch of SAT.
+        let detector = CollisionDetector()
+        let a = Body(shape: .polygon(vertices: [
+            Vec2(0, 1.4142135623730951),
+            Vec2(1.4142135623730951, 0),
+            Vec2(0, -1.4142135623730951),
+            Vec2(-1.4142135623730951, 0),
+        ]), position: Vec2(0, 0))
+        let b = Body(shape: .rectangle(width: 2, height: 2),
+                     position: Vec2(2, 0))
+        let contact = detector.detect(a: a, b: b)
+        XCTAssertNotNil(contact)
+        if let c = contact {
+            // MTV along +x (from A to B), depth ~0.414.
+            XCTAssertGreaterThan(c.normal.x, 0.5)
+            XCTAssertEqual(c.depth, 0.4142135623730951, accuracy: 1e-6)
+        }
+    }
+
+    func testResolverFrictionBranch() {
+        // Two boxes sliding against each other with tangential relative
+        // velocity -> exercises the friction impulse code path.
+        let detector = CollisionDetector()
+        let resolver = CollisionResolver()
+
+        let floor = Body(shape: .rectangle(width: 20, height: 2),
+                         position: Vec2(0, -1), isStatic: true)
+        floor.friction = 0.5
+        let box = Body(shape: .rectangle(width: 2, height: 2),
+                       position: Vec2(0, 0.5), mass: 1.0, restitution: 0.0)
+        box.friction = 0.5
+        box.velocity = Vec2(10, -1)  // tangential + small downward
+        if let contact = detector.detect(a: floor, b: box) {
+            resolver.resolve(contact)
+            // Friction should have reduced the tangential velocity.
+            XCTAssertLessThan(abs(box.velocity.x), 10)
+        } else {
+            XCTFail("Expected collision")
+        }
+    }
+
+    func testResolverBothStaticSkips() {
+        let resolver = CollisionResolver()
+        let a = Body(shape: .circle(radius: 1), position: Vec2(0, 0), isStatic: true)
+        let b = Body(shape: .circle(radius: 1), position: Vec2(0.5, 0), isStatic: true)
+        let contact = Contact(bodyA: a, bodyB: b, normal: Vec2(1, 0),
+                              depth: 1.0, point: Vec2(0.5, 0))
+        // Should be a no-op (both static).
+        resolver.resolve(contact)
+        XCTAssertEqual(a.position.x, 0)
+        XCTAssertEqual(b.position.x, 0.5)
+    }
+
+    func testResolverSeparatingContactSkips() {
+        let resolver = CollisionResolver()
+        let a = Body(shape: .circle(radius: 1), position: Vec2(0, 0), mass: 1.0)
+        let b = Body(shape: .circle(radius: 1), position: Vec2(0, 1.5), mass: 1.0)
+        // Already separating: b moving up, a moving down.
+        a.velocity = Vec2(0, -5)
+        b.velocity = Vec2(0, 5)
+        let contact = Contact(bodyA: a, bodyB: b, normal: Vec2(0, 1),
+                              depth: 0.5, point: Vec2(0, 1))
+        resolver.resolve(contact)
+        // Velocities unchanged because separating.
+        XCTAssertEqual(a.velocity.y, -5, accuracy: 1e-10)
+        XCTAssertEqual(b.velocity.y, 5, accuracy: 1e-10)
+    }
+}
+
+final class CoverageConstraintTests: XCTestCase {
+    func testDistanceJointDefaultDistance() {
+        let a = Body(shape: .circle(radius: 0.5), position: Vec2(0, 0), mass: 1.0)
+        let b = Body(shape: .circle(radius: 0.5), position: Vec2(4, 0), mass: 1.0)
+        let joint = DistanceJoint(bodyA: a, bodyB: b)
+        XCTAssertEqual(joint.distance, 4.0, accuracy: 1e-10)
+    }
+
+    func testDistanceJointWithAnchors() {
+        let a = Body(shape: .circle(radius: 0.5), position: Vec2(0, 0), mass: 1.0)
+        let b = Body(shape: .circle(radius: 0.5), position: Vec2(4, 0), mass: 1.0)
+        let joint = DistanceJoint(bodyA: a, bodyB: b, anchorA: Vec2(1, 0),
+                                  anchorB: Vec2(-1, 0))
+        // worldA = (0,0)+(1,0) = (1,0); worldB = (4,0)+(-1,0) = (3,0); dist = 2
+        XCTAssertEqual(joint.distance, 2.0, accuracy: 1e-10)
+
+        // Solve with rotated bodies to exercise worldAnchor rotation math.
+        a.angle = .pi / 2
+        b.angle = .pi / 2
+        a.position = Vec2(0, 0)
+        b.position = Vec2(4, 0)
+        joint.solve(dt: 1.0 / 60.0)
+        // Positions should have been corrected toward target distance.
+        XCTAssertNotEqual(a.position, Vec2(0, 0))
+    }
+
+    func testDistanceJointBothStaticSkips() {
+        let a = Body(shape: .circle(radius: 0.5), position: Vec2(0, 0), isStatic: true)
+        let b = Body(shape: .circle(radius: 0.5), position: Vec2(4, 0), isStatic: true)
+        let joint = DistanceJoint(bodyA: a, bodyB: b, distance: 2.0)
+        joint.solve(dt: 1.0 / 60.0)
+        XCTAssertEqual(a.position, Vec2(0, 0))
+        XCTAssertEqual(b.position, Vec2(4, 0))
+    }
+
+    func testDistanceJointZeroDeltaSkips() {
+        let a = Body(shape: .circle(radius: 0.5), position: Vec2(0, 0), mass: 1.0)
+        let b = Body(shape: .circle(radius: 0.5), position: Vec2(0, 0), mass: 1.0)
+        let joint = DistanceJoint(bodyA: a, bodyB: b, distance: 0.0)
+        joint.solve(dt: 1.0 / 60.0)
+        // delta length ~0 -> early return, no crash, no movement.
+        XCTAssertEqual(a.position, Vec2(0, 0))
+        XCTAssertEqual(b.position, Vec2(0, 0))
+    }
+
+    func testPinJointSolve() {
+        let body = Body(shape: .circle(radius: 0.5), position: Vec2(1, 0), mass: 1.0)
+        let pin = PinJoint(body: body, pinPosition: Vec2(0, 0), stiffness: 1.0)
+        pin.solve(dt: 1.0 / 60.0)
+        // Body should be pulled toward the pin.
+        XCTAssertEqual(body.position.x, 0, accuracy: 1e-10)
+        XCTAssertEqual(body.position.y, 0, accuracy: 1e-10)
+    }
+
+    func testPinJointWithAnchorAndRotation() {
+        let body = Body(shape: .circle(radius: 0.5), position: Vec2(0, 0), mass: 1.0)
+        body.angle = .pi / 2
+        let pin = PinJoint(body: body, pinPosition: Vec2(0, 0), anchor: Vec2(1, 0),
+                           stiffness: 1.0)
+        pin.solve(dt: 1.0 / 60.0)
+        // After rotation, anchor world pos is (0,1); pin pulls body by -delta.
+        XCTAssertNotEqual(body.position, Vec2(0, 0))
+    }
+
+    func testPinJointStaticSkips() {
+        let body = Body(shape: .circle(radius: 0.5), position: Vec2(1, 0), isStatic: true)
+        let pin = PinJoint(body: body, pinPosition: Vec2(0, 0))
+        pin.solve(dt: 1.0 / 60.0)
+        XCTAssertEqual(body.position, Vec2(1, 0))
+    }
+
+    func testSpringDefaultRestLength() {
+        let a = Body(shape: .circle(radius: 0.5), position: Vec2(0, 0), mass: 1.0)
+        let b = Body(shape: .circle(radius: 0.5), position: Vec2(3, 4), mass: 1.0)
+        let spring = Spring(bodyA: a, bodyB: b)
+        XCTAssertEqual(spring.restLength, 5.0, accuracy: 1e-10)
+    }
+
+    func testSpringZeroLengthSkips() {
+        let a = Body(shape: .circle(radius: 0.5), position: Vec2(0, 0), mass: 1.0)
+        let b = Body(shape: .circle(radius: 0.5), position: Vec2(0, 0), mass: 1.0)
+        let spring = Spring(bodyA: a, bodyB: b, restLength: 0.0, k: 50.0)
+        spring.solve(dt: 1.0 / 60.0)
+        // delta length ~0 -> early return, no forces applied.
+        XCTAssertEqual(a.force, .zero)
+        XCTAssertEqual(b.force, .zero)
+    }
+}
+
+final class CoverageWorldTests: XCTestCase {
+    func testRemoveBodyNotPresentIsNoOp() {
+        let world = World()
+        let body = Body(shape: .circle(radius: 1), position: .zero)
+        let other = Body(shape: .circle(radius: 1), position: Vec2(5, 5))
+        world.addBody(body)
+        world.removeBody(other)  // not in world
+        XCTAssertEqual(world.bodies.count, 1)
+    }
+
+    func testStepSkipsBothStatic() {
+        let world = World(gravity: Vec2(0, -10))
+        let a = Body(shape: .rectangle(width: 10, height: 2), position: Vec2(0, 0), isStatic: true)
+        let b = Body(shape: .rectangle(width: 2, height: 2), position: Vec2(0, 1), isStatic: true)
+        world.addBody(a)
+        world.addBody(b)
+        // Should not crash and should not move.
+        world.step(dt: 1.0 / 60.0)
+        XCTAssertEqual(a.position, Vec2(0, 0))
+        XCTAssertEqual(b.position, Vec2(0, 1))
+    }
+}
